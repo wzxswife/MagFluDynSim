@@ -3,141 +3,121 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import matplotlib.colors as mcolors
 
-def calculate_dispersion(w_vals, w_pe, w_ce, theta_deg):
+def get_dispersion_k(w_vals, w_pe, w_ce, theta_deg, k_max_limit=10.0):
     """
-    根据给定的频率数组 w_vals，计算对应的归一化波数 kc/Omega_e。
-    w_vals: 归一化频率 w/Omega_e
-    w_pe:   归一化电子等离子体频率 w_pe/Omega_e
-    w_ce:   归一化电子回旋频率 (在此归一化下通常为 1.0)
-    theta_deg: 波矢量与磁场夹角 (度)
+    计算给定频率下的归一化波数 kc/Omega_e。
+    关键修正：不删除数组元素，而是将无效值设为 NaN，防止绘图时错误连接。
     """
-    # 将角度转换为弧度
     theta = np.deg2rad(theta_deg)
     sin_t2 = np.sin(theta)**2
     cos_t2 = np.cos(theta)**2
     
-    # 初始化输出数组 (两个根)
-    k_norm_1 = np.full_like(w_vals, np.nan)
-    k_norm_2 = np.full_like(w_vals, np.nan)
+    # 初始化 k 数组为全 NaN
+    k1 = np.full_like(w_vals, np.nan)
+    k2 = np.full_like(w_vals, np.nan)
 
-    # 遍历频率计算 (向量化计算可能会遇到除以零，这里为了清晰分步处理)
-    # 计算 Stix 参数
-    # X = w_pe^2 / w^2
-    # Y = w_ce / w
-    # R = 1 - X / (1 - Y)
-    # L = 1 - X / (1 + Y)
-    # P = 1 - X
-    # S = (R + L) / 2
-    # D = (R - L) / 2
-    
-    # 避免 w=0 或 w=w_ce 处的除零错误，使用 mask 或忽略警告
+    # 忽略除零警告 (处理共振点)
     with np.errstate(divide='ignore', invalid='ignore'):
+        # Stix Parameters
         X = (w_pe / w_vals)**2
         Y = w_ce / w_vals
         
-        # Stix parameters
-        R = 1.0 - X / (1.0 - Y)
-        L = 1.0 - X / (1.0 + Y)
+        # R, L 包含 singularity (w = w_ce)，可能会产生 inf
+        # 使用 epsilon 避免完全除零 (或者依赖 numpy 的 inf 处理)
+        denom_R = 1.0 - Y
+        denom_L = 1.0 + Y
+        
+        R = 1.0 - X / denom_R
+        L = 1.0 - X / denom_L
         P = 1.0 - X
         S = 0.5 * (R + L)
         D = 0.5 * (R - L)
         
-        # 图片公式 (5.45) - (5.47)
+        # Coefficients for n^2
         A = S * sin_t2 + P * cos_t2
         B = R * L * sin_t2 + P * S * (1.0 + cos_t2)
         C = P * R * L
         
-        # 图片公式 (5.49) - 判别式 F^2
-        # F2 = (B^2 - 4AC)
+        # Discriminant F^2
         F2 = (R * L - P * S)**2 * (np.sin(theta)**4) + 4 * (P**2) * (D**2) * cos_t2
+        F = np.sqrt(np.maximum(0, F2)) # maximum 避免数值误差导致的微小负数
         
-        # 计算 n^2 (公式 5.48)
-        # 注意：如果 F2 < 0 (数学上不应在无耗冷等离子体中发生，除非数值误差)，取 abs
-        F = np.sqrt(np.abs(F2))
+        # Calculate n^2 solutions
+        # 2*A 可能会是 0 (Resonance cone)，但这会产生 inf，后续会被过滤
+        n2_1 = (B + F) / (2 * A)
+        n2_2 = (B - F) / (2 * A)
         
-        n2_a = (B + F) / (2 * A)
-        n2_b = (B - F) / (2 * A)
+        # --- 修正核心：过滤逻辑 ---
         
-        # 计算归一化 k = (w/Omega_e) * n
-        # k = (w/c) * n  =>  kc/Omega_e = (w/Omega_e) * n
+        # 1. 过滤倏逝波 (n^2 < 0)
+        # 2. 过滤极大的 n^2 (接近共振) 以防止横向拉丝
+        #    根据 w = kc/n => k = w*n，如果 n 很大，k 也会很大
         
-        # 只取实部传播模式 (n^2 > 0)
-        mask_a = n2_a > 0
-        mask_b = n2_b > 0
-        
-        k_norm_1[mask_a] = w_vals[mask_a] * np.sqrt(n2_a[mask_a])
-        k_norm_2[mask_b] = w_vals[mask_b] * np.sqrt(n2_b[mask_b])
-        
-    return k_norm_1, k_norm_2
+        # 处理第一个根
+        valid_1 = (n2_1 > 0)
+        n_1 = np.sqrt(n2_1, where=valid_1, out=np.full_like(n2_1, np.nan))
+        k_calc_1 = w_vals * n_1
+        # 再次过滤：如果 k 超出绘图范围太多，设为 nan
+        k_calc_1[k_calc_1 > k_max_limit] = np.nan
+        k1 = k_calc_1
 
-def plot_dispersion_panel(ax, w_pe_val, w_ce_val, theta_list, x_limit, y_limit, title_str):
-    # 设置颜色映射 (Blue -> Green -> Red)
+        # 处理第二个根
+        valid_2 = (n2_2 > 0)
+        n_2 = np.sqrt(n2_2, where=valid_2, out=np.full_like(n2_2, np.nan))
+        k_calc_2 = w_vals * n_2
+        k_calc_2[k_calc_2 > k_max_limit] = np.nan
+        k2 = k_calc_2
+        
+    return k1, k2
+
+def plot_panel(ax, w_pe, w_ce, x_lim, y_lim, title):
+    # 参数设置
+    thetas = np.linspace(0, 90, 91) # 增加密度使颜色更连续
+    w_vals = np.linspace(0.001, y_lim, 2000) # 频率分辨率要足够高
+    
+    # 颜色设置
     cmap = cm.jet
     norm = mcolors.Normalize(vmin=0, vmax=90)
     
-    # 为了画图平滑且不连接回旋共振处的断点，我们将频率分为几段
-    # 这里的断点主要在 w/Omega_e = 1 (回旋共振)
-    w_range1 = np.linspace(0.01, 0.99, 500) # 低频段
-    w_range2 = np.linspace(1.01, y_limit, 500) # 高频段
+    # 绘制光速线 (k = w)
+    ax.plot([0, x_lim], [0, x_lim], 'k-', lw=0.5, alpha=0.8)
     
-    # 光速线 (k = w/c => kc/Omega_e = w/Omega_e)
-    ax.plot([0, x_limit], [0, x_limit], 'k-', linewidth=0.8, alpha=0.7)
-    
-    for theta in theta_list:
+    for theta in thetas:
         color = cmap(norm(theta))
         
-        # 计算低频段
-        k1_low, k2_low = calculate_dispersion(w_range1, w_pe_val, w_ce_val, theta)
-        # 计算高频段
-        k1_high, k2_high = calculate_dispersion(w_range2, w_pe_val, w_ce_val, theta)
+        # 传入略大于 x_lim 的限制，以便线条能画满边缘但不乱飞
+        k1, k2 = get_dispersion_k(w_vals, w_pe, w_ce, theta, k_max_limit=x_lim * 1.2)
         
-        # 绘制线条 (分别绘制 k1 和 k2 两个根)
-        # 过滤掉极大的 k 值以防画图混乱
-        limit_mask = 100 
-        
-        # Low freq
-        ax.plot(k1_low[k1_low < limit_mask], w_range1[k1_low < limit_mask], color=color, linewidth=0.8)
-        ax.plot(k2_low[k2_low < limit_mask], w_range1[k2_low < limit_mask], color=color, linewidth=0.8)
-        
-        # High freq
-        ax.plot(k1_high[k1_high < limit_mask], w_range2[k1_high < limit_mask], color=color, linewidth=0.8)
-        ax.plot(k2_high[k2_high < limit_mask], w_range2[k2_high < limit_mask], color=color, linewidth=0.8)
+        # 绘图：由于 k1, k2 包含了 NaN，matplotlib 会自动处理断点
+        ax.plot(k1, w_vals, color=color, linewidth=0.6)
+        ax.plot(k2, w_vals, color=color, linewidth=0.6)
 
-    # 设置坐标轴
-    ax.set_xlim(0, x_limit)
-    ax.set_ylim(0, y_limit)
+    # 装饰
+    ax.set_xlim(0, x_lim)
+    ax.set_ylim(0, y_lim)
     ax.set_xlabel(r'$kc/\Omega_e$', fontsize=14)
     ax.set_ylabel(r'$\omega/\Omega_e$', fontsize=14)
-    ax.set_title(title_str, fontsize=16)
-    
-    # 增加刻度处理
+    ax.set_title(title, fontsize=16)
     ax.tick_params(direction='in', top=True, right=True)
 
-# 主程序
 def main():
-    # 参数设置
-    w_ce = 1.0 # 归一化参考
-    thetas = np.linspace(0, 90, 50) # 0到90度，取50条线
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
     
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
+    # 左图
+    plot_panel(ax1, w_pe=2.0, w_ce=1.0, x_lim=6.0, y_lim=3.0, 
+               title=r'$\omega_{pe}/\Omega_e=2.0$')
     
-    # 左图: w_pe / Omega_e = 2.0
-    plot_dispersion_panel(ax1, w_pe_val=2.0, w_ce_val=w_ce, theta_list=thetas, 
-                          x_limit=6, y_limit=3, 
-                          title_str=r'$\omega_{pe}/\Omega_e=2.0$')
+    # 右图
+    plot_panel(ax2, w_pe=0.5, w_ce=1.0, x_lim=3.0, y_lim=1.5, 
+               title=r'$\omega_{pe}/\Omega_e=0.5$')
     
-    # 右图: w_pe / Omega_e = 0.5
-    plot_dispersion_panel(ax2, w_pe_val=0.5, w_ce_val=w_ce, theta_list=thetas, 
-                          x_limit=3, y_limit=1.5, 
-                          title_str=r'$\omega_{pe}/\Omega_e=0.5$')
-
-    # 添加 Colorbar
+    # Colorbar
     sm = cm.ScalarMappable(cmap=cm.jet, norm=mcolors.Normalize(vmin=0, vmax=90))
     sm.set_array([])
     cbar = fig.colorbar(sm, ax=[ax1, ax2], orientation='vertical', fraction=0.05, pad=0.02)
     cbar.set_label(r'$\theta$ (Deg)', fontsize=14)
     cbar.set_ticks([0, 30, 60, 90])
-
+    
     plt.tight_layout()
     plt.show()
 
