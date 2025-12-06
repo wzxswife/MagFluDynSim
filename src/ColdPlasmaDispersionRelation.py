@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
@@ -111,6 +112,29 @@ def main():
     cbar.set_label(r'$\theta$ (Deg)', fontsize=14)
     cbar.set_ticks([0, 30, 60, 90])
     
+    # 1. 获取当前脚本文件 (.py) 所在的目录 -> 即 src 目录
+    script_dir = os.path.dirname(__file__)
+    
+    # 2. 构建相对路径
+    #    '..' 代表上一级目录 (即 STUDY)
+    #    os.path.join 会自动处理不同系统的路径分隔符
+    #    路径逻辑: src/../results/cold_plasma_dispersion.png
+    save_path = os.path.join(script_dir, '..', 'results', 'cold_plasma_dispersion.png')
+    
+    # 3. (可选) 为了美观，可以把路径规范化（去掉 ..，变成绝对路径），方便打印查看
+    # save_path = os.path.normpath(save_path) 
+    
+    print(f"Saving figure to: {save_path}")
+    
+    # 4. 保存图片
+    # 注意：如果 results 文件夹不存在，savefig 会报错。
+    # 建议加上这行简单的检查和创建代码：
+    results_dir = os.path.dirname(save_path)
+    if not os.path.exists(results_dir):
+        os.makedirs(results_dir)
+        
+    plt.savefig(save_path, dpi=300)
+
     # 显示
     plt.show()
 
