@@ -1,0 +1,160 @@
+
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.rcParams['mathtext.fontset'] = 'cm'
+matplotlib.rcParams['font.family'] = 'serif'
+matplotlib.rcParams['font.size'] = 11
+
+g = 5/3  # gamma
+s_vals = [1.5, 0.5]
+theta0 = 15  # degrees
+
+sin_t = np.sin(np.radians(theta0))
+cos_t = np.cos(np.radians(theta0))
+
+# 临界值
+x1 = 2 / (g - 1) * sin_t  # hat{h}_f (C=0的根)
+x2 = (1 / (2*(g-1) - 0.5*g**2*sin_t**2)) * (
+    sin_t*(2 - g)*(1 + s_vals[1]) +
+    2*cos_t*np.sqrt((g-1)*(1 - s_vals[1])**2 + s_vals[1]*g**2*sin_t**2)
+)  # hat-hat{h}_f (RX=0的根)
+
+h = np.arange(0, 1.001, 0.001)
+
+y1 = np.full((2, len(h)), np.nan)
+y2 = np.full((2, len(h)), np.nan)
+h1 = np.tile(h, (2, 1)).astype(float)
+h2 = np.tile(h, (2, 1)).astype(float)
+
+for j, s0 in enumerate(s_vals):
+    for i in range(len(h)):
+        B = (g/2)*h[i]*sin_t - (1 - s0)
+        C = 2*sin_t - (g - 1)*h[i]
+        RX = B**2 + C*(h[i] + 2*s0*sin_t)
+
+        if RX < 0:
+            h1[j, i] = np.nan
+            h2[j, i] = np.nan
+            continue
+
+        val1 = (B + np.sqrt(RX)) / C
+        val2 = (B - np.sqrt(RX)) / C
+
+        if val1 >= 0:
+            y1[j, i] = val1
+        else:
+            h1[j, i] = np.nan
+
+        if val2 >= 0:
+            y2[j, i] = val2
+        else:
+            h2[j, i] = np.nan
+
+# ========== 绘图 ==========
+fig, ax = plt.subplots(1, 1, figsize=(8, 6.5))
+
+# 主曲线
+# s0=1.5 (实线, 1型激波)
+ax.plot(h1[0], y1[0], 'k-', linewidth=1.2)
+ax.plot(h2[0], y2[0], 'k-', linewidth=1.2)
+
+# s0=0.5 (虚线, 2型激波)
+ax.plot(h1[1], y1[1], 'k--', linewidth=1.2)
+ax.plot(h2[1], y2[1], 'k--', linewidth=1.2)
+
+# 竖直点线 (临界值)
+ax.axvline(x=x1, color='k', linestyle=':', linewidth=0.7)
+ax.axvline(x=x2, color='k', linestyle=':', linewidth=0.7)
+
+# 水平点线 y=0
+ax.plot([0, 0.98], [0, 0], 'k:', linewidth=0.7)
+
+ax.set_xlim(0, 1)
+ax.set_ylim(-50, 250)
+
+# 去掉刻度
+ax.set_xticks([])
+ax.set_yticks([])
+
+# 只保留左和下边框
+ax.spines['top'].set_visible(False)
+ax.spines['right'].set_visible(False)
+ax.spines['bottom'].set_linewidth(0.8)
+ax.spines['left'].set_linewidth(0.8)
+
+# ========== 坐标轴箭头 ==========
+# x轴箭头
+ax.annotate('', xy=(1.01, -50), xytext=(0.99, -50),
+            arrowprops=dict(arrowstyle='->', color='k', lw=1),
+            annotation_clip=False)
+# y轴箭头
+ax.annotate('', xy=(0, 255), xytext=(0, 249),
+            arrowprops=dict(arrowstyle='->', color='k', lw=1),
+            annotation_clip=False)
+
+# ========== "0" 原点标注 ==========
+ax.text(-0.02, -55, r'$0$', fontsize=11, ha='right', va='top')
+
+# ========== 坐标轴标签 ==========
+# y轴标签 (左上角)
+ax.text(-0.04, 245, r'$\dfrac{X_f^{\pm}}{h_f}$', fontsize=10,
+        ha='right', va='top')
+
+# x轴标签 (右端)
+ax.text(1.03, -50, r'$h_f$', fontsize=13, ha='left', va='center')
+
+# ========== hat{h}_f 和 hat-hat{h}_f 标注 (紧贴x轴下方) ==========
+ax.text(x1, -56, r'$\hat{h}_f$', fontsize=12, ha='center', va='top')
+ax.text(x2, -56, r'$\hat{\hat{h}}_f$', fontsize=12, ha='center', va='top')
+
+# ========== 无穷大符号 ∞ + 上箭头 ↑ ==========
+ax.text(x1 + 0.025, 238, r'$\infty$', fontsize=13, ha='center', va='center')
+ax.text(x1 + 0.025, 225, r'$\uparrow$', fontsize=13, ha='center', va='center')
+
+# ========== 曲线标注 ==========
+# X+_f/h_f 标注 (实线上升分支旁边)
+ax.text(x1 - 0.05, 185, r'$\dfrac{X_f^+}{h_f}$', fontsize=9,
+        ha='right', va='center')
+
+# X-_f/h_f 标注 (虚线分支, 右侧中间)
+ax.text(x2 - 0.09, 95, r'$\dfrac{X_f^-}{h_f}$', fontsize=9,
+        ha='left', va='center')
+
+# X+/hf 虚线小分支标注 (靠近水平轴)
+ax.text(x2 - 0.12, 10, r'$\dfrac{X_f^+}{h_f}$', fontsize=9,
+        ha='left', va='center')
+
+# ========== 右侧渐近值公式 ==========
+ax.text(1.02, 3,
+        r'$\dfrac{[1+s_0(\gamma-1)]\sin\theta_0}{(1-s_0)(\gamma-1)-\gamma\sin^2\theta_0}$',
+        fontsize=9, ha='left', va='center')
+
+# ========== 条件标注 (水平轴上下方) ==========
+ax.text(0.06, 8, r'$s_0 \geq 1 - \gamma \sin^2\theta_0 / (\gamma-1)$',
+        fontsize=9, ha='left', va='bottom')
+ax.text(0.06, -8, r'$s_0 < -\gamma \sin^2\theta_0 / (\gamma-1)$',
+        fontsize=9, ha='left', va='top')
+
+# ========== 左侧公式标注 ==========
+ax.text(-0.25, 3,
+        r'$\dfrac{\sqrt{(1\!-\!s_0)^2+4s_0\sin^2\!\theta_0}-(1\!-\!s_0)}{2\sin\theta_0}$',
+        fontsize=9, ha='center', va='center')
+
+# 左侧小箭头 (→ 指向y轴)
+ax.annotate('', xy=(-0.005, 4), xytext=(-0.07, 4),
+            arrowprops=dict(arrowstyle='->', color='k', lw=0.8),
+            annotation_clip=False
+            )
+ax.annotate('', xy=(-0.005, 0), xytext=(-0.07, 0),
+            arrowprops=dict(arrowstyle='->', color='k', lw=0.8),
+            annotation_clip=False
+            )
+
+plt.subplots_adjust(left=0.25, bottom=0.1, right=0.78, top=0.95)
+plt.savefig('FShock.png', dpi=200, bbox_inches='tight',
+            facecolor='white', edgecolor='none')
+plt.savefig('FShock.pdf', bbox_inches='tight',
+            facecolor='white', edgecolor='none')
+print("完成！已保存 FShock.png 和 FShock.pdf")
+plt.show()
