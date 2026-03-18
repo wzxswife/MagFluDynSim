@@ -1,0 +1,95 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.rcParams['font.family'] = 'serif'
+matplotlib.rcParams['mathtext.fontset'] = 'cm'
+
+def c_fast(s, theta):
+    disc = np.sqrt(np.maximum(0, (1+s)**2 - 4*s*np.cos(theta)**2))
+    return np.sqrt(0.5*(1+s+disc))
+
+def c_slow(s, theta):
+    disc = np.sqrt(np.maximum(0, (1+s)**2 - 4*s*np.cos(theta)**2))
+    return np.sqrt(np.maximum(0, 0.5*(1+s-disc)))
+
+theta       = np.linspace(0, 2*np.pi, 1080)
+left_theta  = np.linspace( 0.5*np.pi, 1.5*np.pi, 540)
+right_theta = np.linspace(-0.5*np.pi, 0.5*np.pi, 540)
+
+s_vals = [0.5, 1, 2]
+panel_labels = ['(a)', '(b)', '(c)']
+
+fig = plt.figure(figsize=(13, 5))
+fig.patch.set_facecolor('white')
+
+for idx, (s, plabel) in enumerate(zip(s_vals, panel_labels)):
+    ax = fig.add_subplot(1, 3, idx+1, projection='polar')
+    ax.set_theta_zero_location('E')
+    ax.set_theta_direction(1)
+
+    # ── 三条曲线 ──────────────────────────────────────────────
+    ax.plot(theta, c_fast(s, theta), 'k-', lw=1.8, zorder=3)
+    ax.plot(theta, c_slow(s, theta), 'k-', lw=1.2, zorder=3)
+    ax.plot(left_theta,  -np.cos(left_theta),  'k-', lw=1.2, zorder=3)
+    ax.plot(right_theta,  np.cos(right_theta), 'k-', lw=1.2, zorder=3)
+
+    # ── 坐标轴十字 ───────────────────────────────────────────────────
+    r_ax = np.linspace(0, 1.75, 300)
+    ax.plot(np.zeros(300),           r_ax, 'k-', lw=1.0, zorder=2)
+    ax.plot(np.full(300, np.pi),     r_ax, 'k-', lw=1.0, zorder=2)
+
+
+    # ── 射线（θ=30°，标注f用）────────────────────────────────────
+    theta_ref = 30 * np.pi / 180
+    r_fast_at_ref = c_fast(s, theta_ref)
+    ax.plot([theta_ref]*300, np.linspace(0, r_fast_at_ref + 0.25, 300),
+            'k-', lw=0.9, zorder=2)
+
+    # ── 虚线弧（θ角度弧，用于标注θ）─────────────────────────────────
+    # 画一段从H轴到射线方向的虚线弧（半径固定在1.3处）
+    arc_theta = np.linspace(0, theta_ref, 80)
+    ax.plot(arc_theta, np.full(80, 1.30), 'k--', lw=0.8, dashes=(3,3), zorder=2)
+
+    ax.axis('off')
+    ax.set_rmax(1.82)
+
+    # ── H 箭头 ───────────────────────────────────────────────────────
+    ax.annotate('', xy=(0.0, 1.72), xytext=(0.0, 1.56),
+                arrowprops=dict(arrowstyle='->', color='black',
+                                lw=1.1, mutation_scale=12))
+    ax.text(0.015, 1.78, '$H$', fontsize=12, ha='left', va='center',
+            color='black', fontstyle='italic')
+
+    # ── "1" 单位标注 ─────────────────────────────────────────────────
+    ax.text(0.04, 1.06, '1', fontsize=9, color='black',
+            ha='left', va='bottom')
+
+    # ── θ 标注（在虚线弧旁边，弧的末端右侧）──────────────────────────
+    ax.text(theta_ref - 0.07, 1.38, r'$\theta$', fontsize=11,
+            ha='left', va='center', color='black')
+
+    # ── f 标注──────────────────────────────────────
+    ax.text(theta_ref + 0.10, r_fast_at_ref + 0.10, '$f$', fontsize=11,
+            fontstyle='italic', color='black', ha='center', va='center')
+
+    # ── t 标注（在Alfvén圆外侧上方，约20°处）────────────────────────
+    t_label_angle = 20 * np.pi / 180
+    r_alfven_here = np.abs(np.cos(t_label_angle))
+    ax.text(t_label_angle + 0.04, r_alfven_here + 0.08, '$t$', fontsize=11,
+            fontstyle='italic', color='black', ha='center', va='center')
+
+    # ── s 标注（在慢波圆下方，约20°处）──────────────────────────────
+    r_slow_here = c_slow(s, t_label_angle)
+    if r_slow_here > 0.05:
+        ax.text(t_label_angle + 0.04, r_slow_here - 0.12, '$s$', fontsize=11,
+                fontstyle='italic', color='black', ha='center', va='center')
+
+    # ── 标题和面板标签 ────────────────────────────────────────────────
+    ax.set_title(f's = {s}', fontsize=12, pad=12, fontfamily='serif')
+    ax.annotate(plabel, xy=(1.18*np.pi, 1.80),
+                fontsize=12, annotation_clip=False,
+                color='black', fontfamily='serif')
+
+plt.tight_layout()
+plt.savefig('Friedrich.pdf', format='pdf', bbox_inches='tight', dpi=150)
+plt.show()
