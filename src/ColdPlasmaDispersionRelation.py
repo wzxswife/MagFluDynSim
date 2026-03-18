@@ -119,7 +119,7 @@ def main():
     #    '..' 代表上一级目录 (即 STUDY)
     #    os.path.join 会自动处理不同系统的路径分隔符
     #    路径逻辑: src/../results/cold_plasma_dispersion.png
-    save_path = os.path.join(script_dir, '..', 'results', 'cold_plasma_dispersion.png')
+    save_path = os.path.join(script_dir, '..', 'results', 'cold_plasma_dispersion.pdf')
     
     # 3. (可选) 为了美观，可以把路径规范化（去掉 ..，变成绝对路径），方便打印查看
     # save_path = os.path.normpath(save_path) 
