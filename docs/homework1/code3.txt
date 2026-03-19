@@ -98,7 +98,7 @@ ax.text(-0.02, -55, r'$0$', fontsize=11, ha='right', va='top')
 
 # ========== 坐标轴标签 ==========
 # y轴标签 (左上角)
-ax.text(-0.04, 245, r'$\dfrac{X_f^{\pm}}{h_f}$', fontsize=10,
+ax.text(-0.04, 245, r'$\dfrac{X_f^{\pm}}{h_f}$', fontsize=11,
         ha='right', va='top')
 
 # x轴标签 (右端)
@@ -114,39 +114,39 @@ ax.text(x1 + 0.025, 225, r'$\uparrow$', fontsize=13, ha='center', va='center')
 
 # ========== 曲线标注 ==========
 # X+_f/h_f 标注 (实线上升分支旁边)
-ax.text(x1 - 0.05, 185, r'$\dfrac{X_f^+}{h_f}$', fontsize=9,
+ax.text(x1 - 0.05, 185, r'$\dfrac{X_f^+}{h_f}$', fontsize=10,
         ha='right', va='center')
 
 # X-_f/h_f 标注 (虚线分支, 右侧中间)
-ax.text(x2 - 0.09, 95, r'$\dfrac{X_f^-}{h_f}$', fontsize=9,
+ax.text(x2 - 0.09, 95, r'$\dfrac{X_f^-}{h_f}$', fontsize=10,
         ha='left', va='center')
 
 # X+/hf 虚线小分支标注 (靠近水平轴)
-ax.text(x2 - 0.12, 10, r'$\dfrac{X_f^+}{h_f}$', fontsize=9,
+ax.text(x2 - 0.12, 10, r'$\dfrac{X_f^+}{h_f}$', fontsize=10,
         ha='left', va='center')
 
 # ========== 右侧渐近值公式 ==========
 ax.text(1.02, 3,
         r'$\dfrac{[1+s_0(\gamma-1)]\sin\theta_0}{(1-s_0)(\gamma-1)-\gamma\sin^2\theta_0}$',
-        fontsize=9, ha='left', va='center')
+        fontsize=10, ha='left', va='center')
 
 # ========== 条件标注 (水平轴上下方) ==========
 ax.text(0.06, 8, r'$s_0 \geq 1 - \gamma \sin^2\theta_0 / (\gamma-1)$',
-        fontsize=9, ha='left', va='bottom')
+        fontsize=10, ha='left', va='bottom')
 ax.text(0.06, -8, r'$s_0 < -\gamma \sin^2\theta_0 / (\gamma-1)$',
-        fontsize=9, ha='left', va='top')
+        fontsize=10, ha='left', va='top')
 
 # ========== 左侧公式标注 ==========
-ax.text(-0.25, 3,
+ax.text(-0.3, 3,
         r'$\dfrac{\sqrt{(1\!-\!s_0)^2+4s_0\sin^2\!\theta_0}-(1\!-\!s_0)}{2\sin\theta_0}$',
-        fontsize=9, ha='center', va='center')
+        fontsize=10, ha='center', va='center')
 
 # 左侧小箭头 (→ 指向y轴)
-ax.annotate('', xy=(-0.005, 4), xytext=(-0.07, 4),
+ax.annotate('', xy=(-0.003, 4), xytext=(-0.05, 4),
             arrowprops=dict(arrowstyle='->', color='k', lw=0.8),
             annotation_clip=False
             )
-ax.annotate('', xy=(-0.005, 0), xytext=(-0.07, 0),
+ax.annotate('', xy=(-0.003, 0), xytext=(-0.05, 0),
             arrowprops=dict(arrowstyle='->', color='k', lw=0.8),
             annotation_clip=False
             )
