@@ -50,6 +50,32 @@ def get_flux(w):
     return np.array([w[1], w[1] * u + p, (w[2] + p) * u])
 
 
+def apply_artificial_viscosity(w, w_candidate, dx):
+    """Add pressure-sensor-based viscosity to suppress LW oscillations near shocks."""
+    nx = w.shape[1]
+    rho, u, p = get_primitive(w)
+    p_pad = np.pad(p, 1, mode="edge")
+    sensor = np.zeros(nx)
+
+    for i in range(1, nx - 1):
+        numerator = abs(p_pad[i + 1] - 2.0 * p_pad[i] + p_pad[i - 1])
+        denominator = abs(p_pad[i + 1]) + 2.0 * abs(p_pad[i]) + abs(p_pad[i - 1]) + 1e-12
+        sensor[i] = numerator / denominator
+
+    c = np.sqrt(gamma * p / rho)
+    max_speed = np.abs(u) + c
+    eps_base = 0.12
+    eps_cap = 0.35
+
+    w_visc = w_candidate.copy()
+    for i in range(1, nx - 1):
+        eps_i = min(eps_cap, eps_base + 2.5 * max(sensor[i - 1], sensor[i], sensor[i + 1]))
+        laplacian = w[:, i + 1] - 2.0 * w[:, i] + w[:, i - 1]
+        w_visc[:, i] += eps_i * max_speed[i] * dx * laplacian
+
+    return w_visc
+
+
 def pressure_function(p, rho_k, p_k, gam=gamma):
     """Toro exact solver helper f_k(p) and derivative."""
     a_k = sound_speed(rho_k, p_k, gam)
@@ -184,7 +210,7 @@ def lax_wendroff(w, dx, dt):
         f_half_im1 = get_flux(w_half[:, i - 1])
         w_new[:, i] = w[:, i] - (dt / dx) * (f_half_i - f_half_im1)
 
-    return w_new
+    return apply_artificial_viscosity(w, w_new, dx)
 
 
 def tvd_van_leer(w, dx, dt):
@@ -362,7 +388,7 @@ def main():
         x1,
         w1,
         "Fig 1: Lax-Wendroff (300 grids, CFL=0.22)",
-        save_filename=os.path.join(output_dir, "fig1_lax_wendroff.png"),
+        save_filename=os.path.join(output_dir, "fig1_lax_wendroff.pdf"),
     )
 
     x2, w2 = run_simulation(300, 0.10, "tvd")
@@ -370,7 +396,7 @@ def main():
         x2,
         w2,
         "Fig 2: TVD (300 grids, CFL=0.1)",
-        save_filename=os.path.join(output_dir, "fig2_tvd_300.png"),
+        save_filename=os.path.join(output_dir, "fig2_tvd_300.pdf"),
     )
 
     x3, w3 = run_simulation(600, 0.10, "tvd")
@@ -378,7 +404,7 @@ def main():
         x3,
         w3,
         "Fig 3: TVD (600 grids, CFL=0.1)",
-        save_filename=os.path.join(output_dir, "fig3_tvd_600.png"),
+        save_filename=os.path.join(output_dir, "fig3_tvd_600.pdf"),
     )
 
     x4, w4 = run_simulation(200, 0.01, "upwind")
@@ -386,7 +412,7 @@ def main():
         x4,
         w4,
         "Fig 4: Upwind (200 grids, CFL=0.01)",
-        save_filename=os.path.join(output_dir, "fig4_upwind.png"),
+        save_filename=os.path.join(output_dir, "fig4_upwind.pdf"),
     )
 
 
