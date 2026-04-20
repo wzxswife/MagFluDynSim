@@ -1,202 +1,394 @@
 import os
+
+os.environ["MPLBACKEND"] = "Agg"
+
+import matplotlib
 import numpy as np
+from scipy.optimize import newton
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-# --- 物理参数与初始条件 [cite: 19, 29, 31] ---
+# Physical parameters and initial condition from the assignment.
 gamma = 1.4
 t_end = 0.14
 x_range = (-1.0, 1.0)
-W_L = np.array([0.445, 0.311, 8.928]) # [rho, m, E]
-W_R = np.array([0.5, 0, 1.4275])
+W_L = np.array([0.445, 0.311, 8.928], dtype=float)  # [rho, m, E]
+W_R = np.array([0.5, 0.0, 1.4275], dtype=float)
+
+
+def primitive_to_conservative(rho, u, p, gam=gamma):
+    """Convert primitive variables (rho, u, p) to conserved variables."""
+    m = rho * u
+    E = p / (gam - 1.0) + 0.5 * rho * u**2
+    return np.array([rho, m, E], dtype=float)
+
+
+def conservative_to_primitive(rho, m, E, gam=gamma):
+    """Convert conserved variables (rho, m, E) to primitive variables."""
+    rho = max(float(rho), 1e-12)
+    u = m / rho
+    p = (gam - 1.0) * (E - 0.5 * rho * u**2)
+    return rho, u, max(p, 1e-12)
+
+
+def sound_speed(rho, p, gam=gamma):
+    """Calculate sound speed."""
+    return np.sqrt(max(gam * p / rho, 1e-12))
+
 
 def get_primitive(w):
-    rho = w[0]
+    """Vectorized conserved-to-primitive conversion."""
+    rho = np.maximum(w[0], 1e-12)
     u = w[1] / rho
-    p = (gamma - 1) * (w[2] - 0.5 * rho * u**2)
-    return rho, u, p
+    p = (gamma - 1.0) * (w[2] - 0.5 * rho * u**2)
+    return rho, u, np.maximum(p, 1e-12)
+
 
 def get_flux(w):
     rho, u, p = get_primitive(w)
-    return np.array([w[1], w[1]*u + p, (w[2] + p)*u])
+    return np.array([w[1], w[1] * u + p, (w[2] + p) * u])
 
-# --- 数值格式实现 ---
+
+def pressure_function(p, rho_k, p_k, gam=gamma):
+    """Toro exact solver helper f_k(p) and derivative."""
+    a_k = sound_speed(rho_k, p_k, gam)
+    if p > p_k:
+        A_k = 2.0 / ((gam + 1.0) * rho_k)
+        B_k = (gam - 1.0) / (gam + 1.0) * p_k
+        sqrt_term = np.sqrt(A_k / (p + B_k))
+        f_k = (p - p_k) * sqrt_term
+        df_k = sqrt_term * (1.0 - 0.5 * (p - p_k) / (p + B_k))
+    else:
+        p_ratio = max(p / p_k, 1e-12)
+        expo = (gam - 1.0) / (2.0 * gam)
+        f_k = 2.0 * a_k / (gam - 1.0) * (p_ratio**expo - 1.0)
+        df_k = (1.0 / (rho_k * a_k)) * p_ratio ** (-(gam + 1.0) / (2.0 * gam))
+    return f_k, df_k
+
+
+def find_star_state(rhoL, uL, pL, rhoR, uR, pR, gam=gamma):
+    """Find star-region pressure and velocity."""
+    aL = sound_speed(rhoL, pL, gam)
+    aR = sound_speed(rhoR, pR, gam)
+    p_pv = 0.5 * (pL + pR) - 0.125 * (uR - uL) * (rhoL + rhoR) * (aL + aR)
+    p_guess = max(p_pv, 1e-8)
+
+    def phi(p):
+        fL, _ = pressure_function(p, rhoL, pL, gam)
+        fR, _ = pressure_function(p, rhoR, pR, gam)
+        return fL + fR + (uR - uL)
+
+    def dphi(p):
+        _, dfL = pressure_function(p, rhoL, pL, gam)
+        _, dfR = pressure_function(p, rhoR, pR, gam)
+        return dfL + dfR
+
+    try:
+        p_star = max(newton(phi, p_guess, fprime=dphi, tol=1e-12, maxiter=100), 1e-8)
+    except RuntimeError:
+        p_star = p_guess
+
+    fL, _ = pressure_function(p_star, rhoL, pL, gam)
+    fR, _ = pressure_function(p_star, rhoR, pR, gam)
+    u_star = 0.5 * (uL + uR + fR - fL)
+    return p_star, u_star
+
+
+def sample_solution(xi, p_star, u_star, rhoL, uL, pL, rhoR, uR, pR, gam=gamma):
+    """Sample the exact solution at xi = x / t."""
+    aL = sound_speed(rhoL, pL, gam)
+    aR = sound_speed(rhoR, pR, gam)
+    g1 = (gam - 1.0) / (2.0 * gam)
+    g2 = (gam - 1.0) / (gam + 1.0)
+
+    if p_star > pL:
+        rhoL_star = rhoL * (p_star / pL + g2) / (g2 * p_star / pL + 1.0)
+    else:
+        rhoL_star = rhoL * (p_star / pL) ** (1.0 / gam)
+
+    if p_star > pR:
+        rhoR_star = rhoR * (p_star / pR + g2) / (g2 * p_star / pR + 1.0)
+    else:
+        rhoR_star = rhoR * (p_star / pR) ** (1.0 / gam)
+
+    if xi <= u_star:
+        if p_star > pL:
+            SL = uL - aL * np.sqrt((gam + 1.0) / (2.0 * gam) * p_star / pL + (gam - 1.0) / (2.0 * gam))
+            if xi <= SL:
+                return rhoL, uL, pL
+            return rhoL_star, u_star, p_star
+
+        SHL = uL - aL
+        STL = u_star - aL * (p_star / pL) ** g1
+        if xi <= SHL:
+            return rhoL, uL, pL
+        if xi >= STL:
+            return rhoL_star, u_star, p_star
+
+        u = 2.0 / (gam + 1.0) * (aL + 0.5 * (gam - 1.0) * uL + xi)
+        a = 2.0 / (gam + 1.0) * (aL + 0.5 * (gam - 1.0) * (uL - xi))
+        rho = rhoL * (a / aL) ** (2.0 / (gam - 1.0))
+        p = pL * (a / aL) ** (2.0 * gam / (gam - 1.0))
+        return rho, u, p
+
+    if p_star > pR:
+        SR = uR + aR * np.sqrt((gam + 1.0) / (2.0 * gam) * p_star / pR + (gam - 1.0) / (2.0 * gam))
+        if xi >= SR:
+            return rhoR, uR, pR
+        return rhoR_star, u_star, p_star
+
+    SHR = uR + aR
+    STR = u_star + aR * (p_star / pR) ** g1
+    if xi >= SHR:
+        return rhoR, uR, pR
+    if xi <= STR:
+        return rhoR_star, u_star, p_star
+
+    u = 2.0 / (gam + 1.0) * (-aR + 0.5 * (gam - 1.0) * uR + xi)
+    a = 2.0 / (gam + 1.0) * (aR - 0.5 * (gam - 1.0) * (uR - xi))
+    rho = rhoR * (a / aR) ** (2.0 / (gam - 1.0))
+    p = pR * (a / aR) ** (2.0 * gam / (gam - 1.0))
+    return rho, u, p
+
+
+def exact_riemann_solution(qL, qR, x, t, gam=gamma):
+    """Compute the exact solution of the Euler Riemann problem."""
+    rhoL, uL, pL = conservative_to_primitive(qL[0], qL[1], qL[2], gam)
+    rhoR, uR, pR = conservative_to_primitive(qR[0], qR[1], qR[2], gam)
+    p_star, u_star = find_star_state(rhoL, uL, pL, rhoR, uR, pR, gam)
+
+    rho = np.zeros_like(x)
+    u = np.zeros_like(x)
+    p = np.zeros_like(x)
+
+    for i, xi in enumerate(x / t):
+        rho[i], u[i], p[i] = sample_solution(xi, p_star, u_star, rhoL, uL, pL, rhoR, uR, pR, gam)
+
+    return rho, u, p
+
 
 def lax_wendroff(w, dx, dt):
-    """使用 Richtmyer 两步法实现的 LW 格式，增加人工粘性抑制振荡"""
+    """Richtmyer two-step Lax-Wendroff scheme."""
     nx = w.shape[1]
     w_new = w.copy()
+    w_half = np.zeros((3, nx - 1))
 
-    # 第一步：计算半步中心点的值 (Lax step)
-    w_half = np.zeros((3, nx-1))
-    for i in range(nx-1):
+    for i in range(nx - 1):
         f_i = get_flux(w[:, i])
-        f_ip1 = get_flux(w[:, i+1])
-        w_half[:, i] = 0.5*(w[:, i] + w[:, i+1]) - (dt/(2*dx))*(f_ip1 - f_i)
+        f_ip1 = get_flux(w[:, i + 1])
+        w_half[:, i] = 0.5 * (w[:, i] + w[:, i + 1]) - (dt / (2.0 * dx)) * (f_ip1 - f_i)
 
-    # 第二步：使用半步值更新原格点 (Leapfrog-like step)
-    for i in range(1, nx-1):
+    for i in range(1, nx - 1):
         f_half_i = get_flux(w_half[:, i])
-        f_half_im1 = get_flux(w_half[:, i-1])
-        w_new[:, i] = w[:, i] - (dt/dx)*(f_half_i - f_half_im1)
-
-    # 添加人工粘性抑制振荡 (Jameson-Schmidt-Turkel 风格)
-    # 计算局部声速用于缩放粘性系数
-    rho, u, p = get_primitive(w)
-    c = np.sqrt(gamma * p / rho)
-    max_speed = np.max(np.abs(u) + c)
-
-    # 二阶人工粘性项
-    eps_2 = 0.1  # 二阶粘性系数
-    for i in range(2, nx-2):
-        for k in range(3):  # 三个守恒变量
-            # 二阶导数近似
-            d2w = w[k, i+1] - 2*w[k, i] + w[k, i-1]
-            # 粘性项：基于当地流动特征速度
-            local_c = np.sqrt(gamma * p[i] / rho[i]) if rho[i] > 0 else 1e-10
-            local_max_speed = np.abs(u[i]) + local_c
-            viscosity = eps_2 * dx * local_max_speed
-            w_new[k, i] += viscosity * d2w / dx
+        f_half_im1 = get_flux(w_half[:, i - 1])
+        w_new[:, i] = w[:, i] - (dt / dx) * (f_half_i - f_half_im1)
 
     return w_new
 
+
 def tvd_van_leer(w, dx, dt):
-    """van Leer 通量分裂 TVD 格式 [cite: 50, 58]"""
+    """van Leer flux-vector-splitting scheme."""
     nx = w.shape[1]
     w_new = w.copy()
     f_p = np.zeros_like(w)
     f_m = np.zeros_like(w)
-    
+
     for j in range(nx):
         rho, u, p = get_primitive(w[:, j])
         c = np.sqrt(gamma * p / rho)
         ma = u / c
-        if ma >= 1:
-            f_p[:, j] = get_flux(w[:, j]); f_m[:, j] = 0
-        elif ma <= -1:
-            f_p[:, j] = 0; f_m[:, j] = get_flux(w[:, j])
+        if ma >= 1.0:
+            f_p[:, j] = get_flux(w[:, j])
+            f_m[:, j] = 0.0
+        elif ma <= -1.0:
+            f_p[:, j] = 0.0
+            f_m[:, j] = get_flux(w[:, j])
         else:
-            # 分裂通量公式 [cite: 58]
-            fac = rho * c / 4 * (ma + 1)**2
-            f_p[:, j] = fac * np.array([1, 2*c/gamma*(1 + (gamma-1)/2*ma), 2*c**2/(gamma**2-1)*(1 + (gamma-1)/2*ma)**2])
-            fac_m = -rho * c / 4 * (ma - 1)**2
-            f_m[:, j] = fac_m * np.array([1, 2*c/gamma*(-1 + (gamma-1)/2*ma), 2*c**2/(gamma**2-1)*(1 - (gamma-1)/2*ma)**2])
-            
+            fac_p = rho * c / 4.0 * (ma + 1.0) ** 2
+            fac_m = -rho * c / 4.0 * (ma - 1.0) ** 2
+            f_p[:, j] = fac_p * np.array(
+                [
+                    1.0,
+                    2.0 * c / gamma * (1.0 + 0.5 * (gamma - 1.0) * ma),
+                    2.0 * c**2 / (gamma**2 - 1.0) * (1.0 + 0.5 * (gamma - 1.0) * ma) ** 2,
+                ]
+            )
+            f_m[:, j] = fac_m * np.array(
+                [
+                    1.0,
+                    2.0 * c / gamma * (-1.0 + 0.5 * (gamma - 1.0) * ma),
+                    2.0 * c**2 / (gamma**2 - 1.0) * (1.0 - 0.5 * (gamma - 1.0) * ma) ** 2,
+                ]
+            )
+
     for j in range(1, nx - 1):
-        w_new[:, j] = w[:, j] - (dt/dx) * (f_m[:, j+1] - f_m[:, j] + f_p[:, j] - f_p[:, j-1])
+        w_new[:, j] = w[:, j] - (dt / dx) * (f_m[:, j + 1] - f_m[:, j] + f_p[:, j] - f_p[:, j - 1])
+
     return w_new
+
 
 def upwind_characteristic(w, dx, dt):
-    """基于特征分解的迎风格式 - 使用 HLL 格式 (更稳定)"""
+    """First-order characteristic upwind scheme in primitive variables."""
     nx = w.shape[1]
-    w_new = w.copy()
-
-    # 预计算界面通量
-    flux = np.zeros((3, nx))
+    rho, u, p = get_primitive(w)
+    U_old = np.vstack([rho, u, p])
+    U_new = U_old.copy()
 
     for i in range(1, nx - 1):
-        wL = w[:, i-1]
-        wR = w[:, i]
+        rho_i = max(U_old[0, i], 1e-12)
+        u_i = U_old[1, i]
+        p_i = max(U_old[2, i], 1e-12)
+        a_i = np.sqrt(gamma * p_i / rho_i)
 
-        rhoL, uL, pL = get_primitive(wL)
-        rhoR, uR, pR = get_primitive(wR)
+        R = np.array(
+            [
+                [1.0, 1.0, 1.0],
+                [-a_i / rho_i, 0.0, a_i / rho_i],
+                [a_i**2, 0.0, a_i**2],
+            ]
+        )
+        L = np.linalg.inv(R)
+        lam = np.array([u_i - a_i, u_i, u_i + a_i])
+        A_plus = R @ np.diag(np.maximum(lam, 0.0)) @ L
+        A_minus = R @ np.diag(np.minimum(lam, 0.0)) @ L
 
-        aL = np.sqrt(gamma * pL / rhoL)
-        aR = np.sqrt(gamma * pR / rhoR)
+        dU_minus = U_old[:, i] - U_old[:, i - 1]
+        dU_plus = U_old[:, i + 1] - U_old[:, i]
+        U_new[:, i] = U_old[:, i] - (dt / dx) * (A_plus @ dU_minus + A_minus @ dU_plus)
 
-        # 左右最值特征速度
-        Sm = min(uL - aL, uR - aR)
-        Sp = max(uL + aL, uR + aR)
+    U_new[0] = np.maximum(U_new[0], 1e-12)
+    U_new[2] = np.maximum(U_new[2], 1e-12)
 
-        # 防止除零
-        if abs(Sp - Sm) < 1e-10:
-            flux[:, i] = 0.5 * (get_flux(wL) + get_flux(wR))
-            continue
-
-        fL = get_flux(wL)
-        fR = get_flux(wR)
-
-        # HLL 通量
-        flux[:, i] = (Sp * fL - Sm * fR + Sp * Sm * (wR - wL)) / (Sp - Sm)
-
-    # 应用通量差分
-    for i in range(1, nx - 1):
-        w_new[:, i] = w[:, i] - (dt / dx) * (flux[:, i+1] - flux[:, i])
-
+    w_new = np.zeros_like(w)
+    for i in range(nx):
+        w_new[:, i] = primitive_to_conservative(U_new[0, i], U_new[1, i], U_new[2, i], gamma)
     return w_new
 
-# --- 主模拟函数 ---
-def run_simulation(nx, cfl, method, t_target=0.14):
+
+def run_simulation(nx, cfl, method, t_target=t_end):
     dx = (x_range[1] - x_range[0]) / (nx - 1)
     x = np.linspace(x_range[0], x_range[1], nx)
     w = np.zeros((3, nx))
-    w[:, x < 0] = W_L.reshape(3, 1)
-    w[:, x >= 0] = W_R.reshape(3, 1)
-    
-    t = 0
+    w[:, x < 0.0] = W_L.reshape(3, 1)
+    w[:, x >= 0.0] = W_R.reshape(3, 1)
+
+    t = 0.0
     while t < t_target:
         rho, u, p = get_primitive(w)
-        # 防止压力或密度为负
-        rho = np.maximum(rho, 1e-10)
-        p = np.maximum(p, 1e-10)
         c = np.sqrt(gamma * p / rho)
         dt = cfl * dx / np.max(np.abs(u) + c)
-        if t + dt > t_target: dt = t_target - t
+        if t + dt > t_target:
+            dt = t_target - t
 
-        if method == 'lw': w = lax_wendroff(w, dx, dt)
-        elif method == 'tvd': w = tvd_van_leer(w, dx, dt)
-        elif method == 'upwind': w = upwind_characteristic(w, dx, dt)
+        if method == "lw":
+            w = lax_wendroff(w, dx, dt)
+        elif method == "tvd":
+            w = tvd_van_leer(w, dx, dt)
+        elif method == "upwind":
+            w = upwind_characteristic(w, dx, dt)
+        else:
+            raise ValueError(f"Unknown method: {method}")
 
-        # 确保物理量非负
-        rho_new, u_new, p_new = get_primitive(w)
-        w[0, :] = np.maximum(w[0, :], 1e-10)
-        w[2, :] = np.maximum(w[2, :], 1e-10)
-
+        # Keep far-field states fixed because the waves never reach the boundaries.
+        w[:, 0] = W_L
+        w[:, -1] = W_R
+        w[0] = np.maximum(w[0], 1e-12)
+        w[2] = np.maximum(w[2], 1e-12)
         t += dt
+
     return x, w
 
-# --- 绘图函数 ---
-def plot_results(x, w, title, fig_num, save_filename=None):
+
+def plot_results(x, w, title, save_filename=None, show_exact=True):
     rho, u, p = get_primitive(w)
     m = rho * u
     E = w[2]
-    fig, axes = plt.subplots(3, 1, figsize=(8, 10))
+
+    rho_init = np.where(x < 0.0, W_L[0], W_R[0])
+    m_init = np.where(x < 0.0, W_L[1], W_R[1])
+    E_init = np.where(x < 0.0, W_L[2], W_R[2])
+
+    fig, axes = plt.subplots(3, 1, figsize=(9, 11), sharex=True)
     fig.suptitle(title)
 
-    # 模拟 PDF 中的布局 [cite: 109, 120, 136]
-    labels = ['Density p', 'Mass Flow m=pu', 'Energy E']
-    data = [rho, m, E]
-    for i in range(3):
-        axes[i].plot(x, data[i], 'go-', markersize=4, label='Numerical')
-        axes[i].set_ylabel(labels[i])
-        axes[i].grid(True)
+    exact_data = None
+    x_exact = None
+    if show_exact:
+        x_exact = np.linspace(x_range[0], x_range[1], 2000)
+        rho_exact, u_exact, p_exact = exact_riemann_solution(W_L, W_R, x_exact, t_end, gamma)
+        exact_data = [
+            rho_exact,
+            rho_exact * u_exact,
+            p_exact / (gamma - 1.0) + 0.5 * rho_exact * u_exact**2,
+        ]
+
+    labels = ["Density rho", "Momentum m=rho u", "Energy E"]
+    initial_data = [rho_init, m_init, E_init]
+    numerical_data = [rho, m, E]
+
+    for idx in range(3):
+        axes[idx].plot(x, initial_data[idx], color="lightskyblue", linewidth=1.5, label="Initial value")
+        if exact_data is not None:
+            axes[idx].plot(x_exact, exact_data[idx], color="tab:orange", linewidth=1.8, label="Exact")
+        axes[idx].plot(
+            x,
+            numerical_data[idx],
+            color="tab:green",
+            marker="o",
+            markersize=2.8,
+            linewidth=1.0,
+            label="Numerical",
+        )
+        axes[idx].set_ylabel(labels[idx])
+        axes[idx].grid(True, alpha=0.4)
+        axes[idx].legend(loc="best")
+
+    axes[-1].set_xlabel("x")
     plt.tight_layout()
 
-    # 保存图片
     if save_filename is not None:
-        fig.savefig(save_filename, dpi=150, bbox_inches='tight')
+        fig.savefig(save_filename, dpi=150, bbox_inches="tight")
         print(f"Saved: {save_filename}")
-    plt.show()
+    plt.close(fig)
 
-# --- 生成 PDF 中的所有图像 [cite: 96, 97, 98] ---
-output_dir = "output"
-os.makedirs(output_dir, exist_ok=True)
 
-# 图1: Lax-Wendroff, 300网格, CFL=0.22
-x1, w1 = run_simulation(300, 0.22, 'lw')
-plot_results(x1, w1, "Fig 1: Lax-Wendroff (300 grids, CFL=0.22)", 1,
-            save_filename=os.path.join(output_dir, "fig1_lax_wendroff.png"))
+def main():
+    output_dir = "output"
+    os.makedirs(output_dir, exist_ok=True)
 
-# 图2: TVD, 300网格, CFL=0.1
-x2, w2 = run_simulation(300, 0.1, 'tvd')
-plot_results(x2, w2, "Fig 2: TVD (300 grids, CFL=0.1)", 2,
-            save_filename=os.path.join(output_dir, "fig2_tvd_300.png"))
+    x1, w1 = run_simulation(300, 0.22, "lw")
+    plot_results(
+        x1,
+        w1,
+        "Fig 1: Lax-Wendroff (300 grids, CFL=0.22)",
+        save_filename=os.path.join(output_dir, "fig1_lax_wendroff.png"),
+    )
 
-# 图3: TVD, 600网格, CFL=0.1
-x3, w3 = run_simulation(600, 0.1, 'tvd')
-plot_results(x3, w3, "Fig 3: TVD (600 grids, CFL=0.1)", 3,
-            save_filename=os.path.join(output_dir, "fig3_tvd_600.png"))
+    x2, w2 = run_simulation(300, 0.10, "tvd")
+    plot_results(
+        x2,
+        w2,
+        "Fig 2: TVD (300 grids, CFL=0.1)",
+        save_filename=os.path.join(output_dir, "fig2_tvd_300.png"),
+    )
 
-# 图4: Upwind, 200网格, CFL=0.01
-x4, w4 = run_simulation(200, 0.01, 'upwind')
-plot_results(x4, w4, "Fig 4: Upwind (200 grids, CFL=0.01)", 4,
-            save_filename=os.path.join(output_dir, "fig4_upwind.png"))
+    x3, w3 = run_simulation(600, 0.10, "tvd")
+    plot_results(
+        x3,
+        w3,
+        "Fig 3: TVD (600 grids, CFL=0.1)",
+        save_filename=os.path.join(output_dir, "fig3_tvd_600.png"),
+    )
+
+    x4, w4 = run_simulation(200, 0.01, "upwind")
+    plot_results(
+        x4,
+        w4,
+        "Fig 4: Upwind (200 grids, CFL=0.01)",
+        save_filename=os.path.join(output_dir, "fig4_upwind.png"),
+    )
+
+
+if __name__ == "__main__":
+    main()
